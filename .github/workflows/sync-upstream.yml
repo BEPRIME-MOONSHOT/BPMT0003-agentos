@@ -1,0 +1,59 @@
+name: Sync Agno upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 8 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-agno-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/agno-agi/agentos-docker.git
+          git fetch --no-tags upstream main
+
+      - name: Create or update sync branch
+        id: sync
+        run: |
+          if git diff --quiet HEAD upstream/main; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git switch -C sync/agno-upstream upstream/main
+          git push --force-with-lease origin sync/agno-upstream
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update pull request
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing_pr="$(gh pr list --head sync/agno-upstream --base main --state open --json number --jq '.[0].number')"
+          if [ -n "$existing_pr" ]; then
+            gh pr edit "$existing_pr" \
+              --title "chore: sync Agno upstream" \
+              --body "Automated sync proposal from \`agno-agi/agentos-docker@$(git rev-parse --short upstream/main)\`. Review before merging; Coolify deploys only after the PR reaches \`main\`."
+          else
+            gh pr create \
+              --base main \
+              --head sync/agno-upstream \
+              --title "chore: sync Agno upstream" \
+              --body "Automated sync proposal from \`agno-agi/agentos-docker@$(git rev-parse --short upstream/main)\`. Review before merging; Coolify deploys only after the PR reaches \`main\`."
+          fi

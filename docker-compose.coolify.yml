@@ -1,0 +1,62 @@
+# Production deployment for Coolify.
+# Configure the required variables in Coolify (not in a committed .env file).
+# Coolify should route the agentos-api service to its internal port 8000.
+services:
+  agentos-db:
+    image: agnohq/pgvector:18
+    restart: unless-stopped
+    volumes:
+      - agentos-pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_USER: ${DB_USER:-ai}
+      POSTGRES_PASSWORD: ${DB_PASS:?Set DB_PASS in Coolify}
+      POSTGRES_DB: ${DB_DATABASE:-ai}
+    networks:
+      - agentos
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ai} -d ${DB_DATABASE:-ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  agentos-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${IMAGE_NAME:-agentos}:${IMAGE_TAG:-latest}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      RUNTIME_ENV: prd
+      AGNO_DEBUG: "False"
+      WAIT_FOR_DB: "True"
+      AGENTOS_URL: ${AGENTOS_URL:?Set AGENTOS_URL in Coolify}
+      MCP_CONNECT_SECRET: ${MCP_CONNECT_SECRET:-}
+      JWT_VERIFICATION_KEY: ${JWT_VERIFICATION_KEY:?Set JWT_VERIFICATION_KEY in Coolify}
+      JWT_JWKS_FILE: ${JWT_JWKS_FILE:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in Coolify}
+      DB_HOST: agentos-db
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-ai}
+      DB_PASS: ${DB_PASS:?Set DB_PASS in Coolify}
+      DB_DATABASE: ${DB_DATABASE:-ai}
+      ENABLE_DEPLOY_CHECK: ${ENABLE_DEPLOY_CHECK:-True}
+      PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+    depends_on:
+      agentos-db:
+        condition: service_healthy
+    networks:
+      - agentos
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  agentos:
+
+volumes:
+  agentos-pgdata:
